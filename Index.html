@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <title>UNI Time</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#08080c">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <header class="header">
+    <div>
+      <h1>UNI Time</h1>
+      <p class="sub">Electrical Engineering Prep Tracker</p>
+      <div class="data-actions">
+        <button class="btn-data" onclick="exportData()">Export</button>
+        <button class="btn-data" onclick="importData()">Import</button>
+        <input type="file" id="importPicker" accept=".json" style="display:none" onchange="handleImportFile(event)" />
+      </div>
+    </div>
+
+    <div class="card progress-card" id="progressCard">
+      <div class="row">
+        <span class="label">Total Progress</span>
+        <span id="progressText" class="mono">0 / 0 hrs</span>
+      </div>
+      <div class="bar-track">
+        <div id="fill" class="bar-fill"></div>
+      </div>
+      <div id="percent" class="percent-text">0% Complete</div>
+      <div class="progress-hint">Hold to see overview</div>
+    </div>
+  </header>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="card stat-card"><div class="stat-label">Prep Days</div><div class="stat-value">89</div></div>
+    <div class="card stat-card"><div class="stat-label">Daily Target</div><div class="stat-value">2h</div></div>
+    <div class="card stat-card"><div class="stat-label">Planned</div><div class="stat-value" id="planned">—</div></div>
+    <div class="card stat-card"><div class="stat-label">Buffer</div><div class="stat-value" id="buffer">—</div></div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <button class="filter-btn active" data-filter="ALL">All</button>
+    <button class="filter-btn" data-filter="NEED">Need</button>
+    <button class="filter-btn" data-filter="GOOD">Good</button>
+    <button class="filter-btn" data-filter="EXTRA">Extra</button>
+    <button class="filter-btn" data-filter="FUN">Fun</button>
+    <button class="filter-btn" data-filter="SORT_PROGRESS">By Progress</button>
+    <button class="filter-btn" data-filter="SORT_SHORT">Shortest</button>
+  </div>
+
+  <!-- Goals -->
+  <section>
+    <div class="section-header">
+      <h2>Goals</h2>
+      <button class="btn-add-goal" onclick="openAddModal()">+ Add Goal</button>
+    </div>
+    <div id="grid" class="grid"></div>
+    <p class="hold-hint" style="margin-top:10px">Hold a goal card to edit or delete it</p>
+  </section>
+
+  <!-- Bottom panels -->
+  <div class="bottom-grid">
+    <div class="card panel">
+      <h2>Priority</h2>
+      <ol class="priority-list">
+        <li>Math</li>
+        <li>Electricity</li>
+        <li>Coding</li>
+        <li>Everything else</li>
+      </ol>
+    </div>
+    <div class="card panel">
+      <h2>Avoid</h2>
+      <ul class="warning-list">
+        <li>endless Linux tweaking</li>
+        <li>tutorials without building</li>
+        <li>reorganizing notes</li>
+        <li>polishing over solving</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal" class="modal-overlay" onclick="closeEditModal(event)">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <h3>Edit Goal</h3>
+    <label>Name</label>
+    <input id="editName" type="text" class="modal-input" />
+    <label>Category</label>
+    <select id="editCat" class="modal-input">
+      <option value="NEED">NEED</option>
+      <option value="GOOD">GOOD</option>
+      <option value="EXTRA">EXTRA</option>
+      <option value="FUN">FUN</option>
+    </select>
+    <label>Estimated Hours</label>
+    <input id="editEst" type="number" class="modal-input" min="0.5" step="0.5"/>
+    <div class="modal-actions">
+      <button class="btn-delete" onclick="confirmDelete()">Delete</button>
+      <button class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+      <button class="btn-save" onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div id="addModal" class="modal-overlay" onclick="closeAddModal(event)">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <h3>New Goal</h3>
+    <label>Name</label>
+    <input id="addName" type="text" class="modal-input" placeholder="Goal name..." />
+    <label>Category</label>
+    <select id="addCat" class="modal-input">
+      <option value="NEED">NEED</option>
+      <option value="GOOD">GOOD</option>
+      <option value="EXTRA">EXTRA</option>
+      <option value="FUN">FUN</option>
+    </select>
+    <label>Estimated Hours</label>
+    <input id="addEst" type="number" class="modal-input" min="0.5" step="0.5" value="5"/>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAddModal()">Cancel</button>
+      <button class="btn-save" onclick="confirmAdd()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Overview Modal -->
+<div id="overviewModal" class="modal-overlay" onclick="closeOverview(event)">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <h3>Overview</h3>
+    <div id="overviewContent"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js');
+  }
+</script>
+</body>
+</html>
