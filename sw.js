@@ -1,4 +1,4 @@
-const CACHE = "uni-v3";
+const CACHE = "uni-v4";
 const FILES = [
   "/", "/index.html", "/style.css", "/app.js", "/manifest.json",
   "/passphrase.js", "/qr.js", "/sync.js",
