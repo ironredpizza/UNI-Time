@@ -89,15 +89,14 @@ function setupObservers() {
   ydailyLog.observe(onRemoteChange);
 
   // Status events from provider
-  provider.on('status', (event) => {
-    const allPeers = provider
-      ? Array.from(provider.awareness.getStates().values()).filter(s => s.user).length
-      : 0;
+  provider.on('synced', (event) => {
+    const allPeers = provider ? provider.awareness.getStates().size : 0;
     const peers = Math.max(0, allPeers - 1); // exclude self
-    _lastP2PStatus = event.status;
+    const status = event.synced ? 'connected' : 'connecting';
+    _lastP2PStatus = status;
     _lastPeerCount = peers;
     window.dispatchEvent(new CustomEvent('yjs-status', {
-      detail: { status: event.status, peers }
+      detail: { status, peers }
     }));
   });
 
@@ -109,15 +108,8 @@ function setupObservers() {
   }));
 }
 
-async function initSync() {
+async function _connect(phrase) {
   await ensureLibs();
-  const phrase = localStorage.getItem('uni_p2p_phrase');
-  if (!phrase) {
-    window.dispatchEvent(new CustomEvent('yjs-status', {
-      detail: { status: 'off', peers: 0 }
-    }));
-    return { status: 'off' };
-  }
 
   // Tear down any previous connection
   if (provider) { provider.destroy(); provider = null; }
@@ -133,17 +125,17 @@ async function initSync() {
   });
 
   setupObservers();
+}
 
-  // If the room is empty, push our local state so remote peers see our data.
-  // If remote data already exists, let the observer pull it in.
-  const app = getApp();
-  if (app && app.state) {
-    const ygoals = ydoc.getMap('goals');
-    if (ygoals.size === 0) {
-      pushState(app.state);
-    }
+async function initSync() {
+  const phrase = localStorage.getItem('uni_p2p_phrase');
+  if (!phrase) {
+    window.dispatchEvent(new CustomEvent('yjs-status', {
+      detail: { status: 'off', peers: 0 }
+    }));
+    return { status: 'off' };
   }
-
+  await _connect(phrase);
   return { status: 'connecting', phrase };
 }
 
@@ -197,10 +189,24 @@ function pushState(state) {
   }, 0);
 }
 
-function createRoom(phrase) {
+async function createRoom(phrase) {
   if (!phrase || typeof phrase !== 'string') return;
   localStorage.setItem('uni_p2p_phrase', phrase);
-  return initSync();
+  await _connect(phrase);
+  // Creator pushes their local state so joiners receive it
+  const app = getApp();
+  if (app && app.state) {
+    pushState(app.state);
+  }
+  return { status: 'connecting', phrase };
+}
+
+async function joinRoom(phrase) {
+  if (!phrase || typeof phrase !== 'string') return;
+  localStorage.setItem('uni_p2p_phrase', phrase);
+  await _connect(phrase);
+  // Joiner does NOT push local state — waits for remote data via observer
+  return { status: 'connecting', phrase };
 }
 
 function leaveRoom() {
@@ -227,6 +233,7 @@ window.YjsSync = {
   init: initSync,
   pushState,
   createRoom,
+  joinRoom,
   leaveRoom,
   getPhrase,
   getStatus,

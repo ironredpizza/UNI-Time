@@ -654,19 +654,19 @@ function closeSyncModal(e) {
   document.getElementById('syncModal').classList.remove('open');
 }
 
-function createSyncRoom() {
+async function createSyncRoom() {
   const phrase = window.Passphrase ? window.Passphrase.generate() : 'room-' + Math.random().toString(36).slice(2, 10);
   if (window.YjsSync) {
-    window.YjsSync.createRoom(phrase);
+    await window.YjsSync.createRoom(phrase);
     openSyncModal();
   }
 }
 
-function joinSyncRoom() {
+async function joinSyncRoom() {
   const phrase = document.getElementById('syncPhraseInput').value.trim();
   if (!phrase) return;
   if (window.YjsSync) {
-    window.YjsSync.createRoom(phrase);
+    await window.YjsSync.joinRoom(phrase);
     openSyncModal();
   }
 }
