@@ -20,9 +20,12 @@
       <h1>UNI Time</h1>
       <p class="sub">Electrical Engineering Prep Tracker</p>
       <div class="data-actions">
+        <button class="btn-data" onclick="openSettingsModal()">Settings</button>
         <button class="btn-data" onclick="exportData()">Export</button>
         <button class="btn-data" onclick="importData()">Import</button>
+        <button class="btn-data" onclick="openSyncModal()">Sync</button>
         <input type="file" id="importPicker" accept=".json" style="display:none" onchange="handleImportFile(event)" />
+        <span id="syncIndicator" class="sync-indicator disconnected"></span>
       </div>
     </div>
 
@@ -31,20 +34,29 @@
         <span class="label">Total Progress</span>
         <span id="progressText" class="mono">0 / 0 hrs</span>
       </div>
-      <div class="bar-track">
-        <div id="fill" class="bar-fill"></div>
+      <div class="bar-container">
+        <div class="bar-labels" id="barLabels" style="display:none">
+          <span class="bar-label today" id="labelToday">0%</span>
+          <span class="bar-label week" id="labelWeek">0%</span>
+        </div>
+        <div class="bar-track">
+          <div id="fill" class="bar-fill"></div>
+          <div class="bar-indicator today" id="lineToday"></div>
+          <div class="bar-indicator week" id="lineWeek"></div>
+        </div>
       </div>
       <div id="percent" class="percent-text">0% Complete</div>
       <div class="progress-hint">Hold to see overview</div>
     </div>
+    <div id="suggestion" class="suggestion">Set your dates in Settings to see projections.</div>
   </header>
 
   <!-- Stats -->
   <div class="stats">
-    <div class="card stat-card"><div class="stat-label">Prep Days</div><div class="stat-value">89</div></div>
-    <div class="card stat-card"><div class="stat-label">Daily Target</div><div class="stat-value">2h</div></div>
-    <div class="card stat-card"><div class="stat-label">Planned</div><div class="stat-value" id="planned">—</div></div>
-    <div class="card stat-card"><div class="stat-label">Buffer</div><div class="stat-value" id="buffer">—</div></div>
+    <div class="card stat-card"><div class="stat-label">Days Left</div><div class="stat-value" id="daysLeft">—</div></div>
+    <div class="card stat-card"><div class="stat-label">Daily Target</div><div class="stat-value" id="dailyTarget">—</div></div>
+    <div class="card stat-card"><div class="stat-label">Rate Needed</div><div class="stat-value" id="rateNeeded">—</div></div>
+    <div class="card stat-card"><div class="stat-label">Your Pace</div><div class="stat-value" id="yourPace">—</div></div>
   </div>
 
   <!-- Filter bar -->
@@ -56,6 +68,7 @@
     <button class="filter-btn" data-filter="FUN">Fun</button>
     <button class="filter-btn" data-filter="SORT_PROGRESS">By Progress</button>
     <button class="filter-btn" data-filter="SORT_SHORT">Shortest</button>
+    <button class="filter-btn" data-filter="SORT_RECENT">Recent</button>
   </div>
 
   <!-- Goals -->
@@ -148,6 +161,70 @@
   </div>
 </div>
 
+<!-- Sync Modal -->
+<div id="syncModal" class="modal-overlay" onclick="closeSyncModal(event)">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <h3>Cross-Device Sync</h3>
+    <div id="syncPanelNotConnected">
+      <p style="font-size:0.85rem;color:#707088;margin-bottom:12px;">
+        Sync your data between phone and desktop in real-time. No account needed.
+      </p>
+      <button class="btn-save" onclick="createSyncRoom()" style="width:100%;margin-bottom:12px;">Create Sync Room</button>
+      <hr class="settings-hr" />
+      <label>Join Existing Room</label>
+      <input id="syncPhraseInput" type="text" class="modal-input" placeholder="e.g. rapid-zebra-cloud-moon" />
+      <button class="btn-cancel" onclick="joinSyncRoom()" style="width:100%;margin-top:8px;">Join</button>
+    </div>
+    <div id="syncPanelConnected" style="display:none;">
+      <div class="sync-phrase-box">
+        <label>Your Sync Phrase</label>
+        <div id="syncPhraseDisplay" class="sync-phrase"></div>
+        <button class="btn-copy" onclick="copySyncPhrase()">Copy</button>
+      </div>
+      <div id="qrContainer" style="text-align:center;margin:12px 0;"></div>
+      <div class="sync-status">
+        <span id="p2pStatusDot" class="sync-dot off"></span>
+        <span id="p2pStatusText">Offline</span>
+        <span id="p2pPeerCount" class="sync-peers"></span>
+      </div>
+      <button class="btn-delete" onclick="leaveSyncRoom()" style="width:100%;margin-top:12px;">Leave Room</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal-overlay" onclick="closeSettingsModal(event)">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <h3>Settings</h3>
+    <label>Start Date</label>
+    <input id="settingsStartDate" type="date" class="modal-input" />
+    <label>End Date</label>
+    <input id="settingsEndDate" type="date" class="modal-input" />
+    <label>Daily Target (hours)</label>
+    <input id="settingsDailyTarget" type="number" class="modal-input" min="0.5" step="0.5" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeSettingsModal()">Cancel</button>
+      <button class="btn-save" onclick="saveSettings()">Save</button>
+    </div>
+    <hr class="settings-hr" />
+    <h3>GitHub Sync</h3>
+    <label>Personal Access Token</label>
+    <input id="githubToken" type="password" class="modal-input" placeholder="ghp_..." />
+    <label>Gist ID (leave blank to auto-create)</label>
+    <input id="gistId" type="text" class="modal-input" placeholder="Optional" />
+    <div class="modal-actions">
+      <button class="btn-save" id="gistConnectBtn" onclick="connectGist()">Connect</button>
+      <button class="btn-cancel" id="gistRemoveBtn" onclick="removeGist()" style="display:none">Disconnect</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="passphrase.js"></script>
+<script src="qr.js"></script>
+<script src="sync.js"></script>
 <script src="app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {

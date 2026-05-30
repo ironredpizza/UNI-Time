@@ -59,7 +59,7 @@ h1 {
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -1px;
-  color: var(--white);
+  color: var(--need);
 }
 
 .sub {
@@ -91,6 +91,33 @@ h1 {
 .btn-data:hover {
   color: var(--white);
   border-color: var(--white);
+}
+
+/* ── Sync indicator dot ────────────────────────────────── */
+.sync-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #444455;
+  transition: background .3s;
+  flex-shrink: 0;
+  align-self: center;
+}
+.sync-indicator.connected { background: #56e39f; box-shadow: 0 0 6px #56e39f66; }
+.sync-indicator.error     { background: #ff6b6b; box-shadow: 0 0 6px #ff6b6b66; }
+.sync-indicator.syncing   { background: #ffd166; animation: syncPulse .6s infinite; }
+
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+/* ── Settings divider ───────────────────────────────────── */
+.settings-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0 8px;
 }
 
 /* ── Progress card ────────────────────────────────────── */
@@ -136,6 +163,46 @@ h1 {
   transition: width .6s cubic-bezier(.4,0,.2,1);
 }
 
+/* Bar container — wraps labels and track so labels aren't clipped */
+.bar-container {
+  position: relative;
+}
+
+/* Labels row — sits just above the bar */
+.bar-labels {
+  position: relative;
+  height: 12px;
+  margin-bottom: 2px;
+}
+
+.bar-label {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bar-label.today { color: #ffd166; }
+.bar-label.week  { color: #74b3ff; }
+
+/* Indicator lines — sit inside the bar */
+.bar-indicator {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.bar-indicator.today { background: #ffd166; }
+.bar-indicator.week  { background: #74b3ff; }
+
 .percent-text {
   font-family: var(--font-mono);
   font-size: 1.5rem;
@@ -148,6 +215,18 @@ h1 {
   font-size: 0.72rem;
   color: #707088;
   margin-top: 4px;
+}
+
+/* ── Suggestion text (timeline projection) ────────────── */
+.suggestion {
+  font-size: 0.8rem;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  line-height: 1.6;
+  color: var(--text);
 }
 
 /* ── Stats ────────────────────────────────────────────── */
@@ -414,10 +493,26 @@ h1 {
 }
 .btn-expand:hover { color: var(--white); }
 
-/* ── Unallocated label on goal card ─────────────────────── */
-.goal-unalloc {
+/* ── Pin button ─────────────────────────────────────────── */
+.btn-pin {
+  background: none;
+  border: none;
+  color: #444455;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 2px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  transition: color .15s;
+}
+.btn-pin:hover { color: var(--white); }
+.btn-pin[title="Unpin"] { color: #ffd166; }
+
+/* ── Remaining label on goal card ───────────────────────── */
+.goal-remaining {
   font-size: 0.7rem;
-  color: #ffd166;
+  color: #707088;
   flex-shrink: 0;
 }
 
@@ -862,4 +957,146 @@ select.modal-input option { background: var(--surface2); }
 .ov-bar-fill {
   height: 100%;
   border-radius: 99px;
+}
+
+/* ── Weekly analysis ─────────────────────────────────────── */
+.weekly-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.weekly-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+
+.weekly-day-name {
+  width: 32px;
+  font-size: 0.75rem;
+  color: #707088;
+  flex-shrink: 0;
+}
+
+.weekly-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: var(--surface);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.weekly-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .3s ease;
+}
+
+.weekly-hours {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--white);
+  min-width: 40px;
+  text-align: right;
+}
+
+.weekly-total {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--white);
+  text-align: center;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+
+.weekly-section {
+  margin-top: 4px;
+}
+
+/* ── Sync modal styles ──────────────────────────────────── */
+.sync-phrase-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-phrase {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  color: var(--white);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+  word-break: break-all;
+}
+
+.btn-copy {
+  align-self: flex-end;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: #707088;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.btn-copy:hover {
+  border-color: var(--white);
+  color: var(--white);
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface2);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.sync-dot.off {
+  background: #444455;
+}
+
+.sync-dot.connecting {
+  background: #ffd166;
+  animation: pulse 1.2s infinite;
+}
+
+.sync-dot.connected {
+  background: #56e39f;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.sync-peers {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #707088;
 }

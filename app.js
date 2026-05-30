@@ -67,11 +67,25 @@ function loadState() {
 let state = loadState();
 let goals = state.goals;
 let activeFilter = "ALL";
+let sortDirection = 1;
 let expandedSet = new Set();
+let gistToken = localStorage.getItem("uni_gist_token") || "";
+let gistId = localStorage.getItem("uni_gist_id") || "";
+let gistSynced = null;
+let syncDebounce = null;
 
-function save() {
+// Expose app API to sync.js
+window.UniApp = {
+  get state() { return state; },
+  get goals() { return goals; },
+  render
+};
+
+function save(skipYjsPush) {
   state.goals = goals;
   localStorage.setItem("uni_v3", JSON.stringify(state));
+  scheduleSync();
+  if (!skipYjsPush && window.YjsSync) window.YjsSync.pushState(state);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -81,14 +95,23 @@ function escHtml(s) {
 
 function visibleGoals() {
   let list = [...goals];
-  if (activeFilter === "SORT_PROGRESS") {
-    list.sort((a, b) => (a.done/a.est) - (b.done/b.est));
-  } else if (activeFilter === "SORT_SHORT") {
-    list.sort((a, b) => a.est - b.est);
-  } else if (activeFilter !== "ALL") {
+  if (activeFilter !== "ALL" && activeFilter !== "SORT_PROGRESS" && activeFilter !== "SORT_SHORT" && activeFilter !== "SORT_RECENT") {
     list = list.filter(g => g.cat === activeFilter);
   }
-  return list;
+  const pinned = list.filter(g => g.pinned);
+  const unpinned = list.filter(g => !g.pinned);
+  function sortBy(cmp) {
+    pinned.sort((a, b) => sortDirection * cmp(a, b));
+    unpinned.sort((a, b) => sortDirection * cmp(a, b));
+  }
+  if (activeFilter === "SORT_PROGRESS") {
+    sortBy((a, b) => (a.done/a.est) - (b.done/b.est));
+  } else if (activeFilter === "SORT_SHORT") {
+    sortBy((a, b) => a.est - b.est);
+  } else if (activeFilter === "SORT_RECENT") {
+    sortBy((a, b) => (new Date(b.lastModified||0)) - (new Date(a.lastModified||0)));
+  }
+  return [...pinned, ...unpinned];
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────────
@@ -100,8 +123,51 @@ function render() {
   document.getElementById("progressText").textContent = done.toFixed(2) + " / " + total + " hrs";
   document.getElementById("fill").style.width = pct + "%";
   document.getElementById("percent").textContent = pct + "% Complete";
-  document.getElementById("planned").textContent = total + "h";
-  document.getElementById("buffer").textContent  = (178-total).toFixed(0) + "h";
+
+  // Timeline projections
+  const s = state.settings;
+  const today = new Date().toISOString().slice(0, 10);
+  const daysElapsed = Math.max(1, daysBetween(s.startDate, today));
+  const daysLeft = Math.max(0, daysBetween(today, s.endDate));
+  const currentRate = done / daysElapsed;
+  const requiredRate = daysLeft > 0 ? (total - done) / daysLeft : 0;
+  const projected = currentRate > 0 ? addDays(today, Math.ceil((total - done) / currentRate)) : "—";
+
+  document.getElementById("daysLeft").textContent = daysLeft;
+  document.getElementById("dailyTarget").textContent = s.dailyTarget + "h";
+  document.getElementById("rateNeeded").textContent = requiredRate.toFixed(1) + "h";
+  document.getElementById("yourPace").textContent = currentRate.toFixed(1) + "h";
+
+  // Target markers
+  const totalDays = daysBetween(s.startDate, s.endDate);
+  const targetTodayPct = totalDays > 0 ? Math.min(Math.round((daysElapsed / totalDays) * 100), 100) : 0;
+  const dayOfWeek = new Date().getDay();
+  const daysToSun = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+  const targetWeekPct = totalDays > 0 ? Math.min(Math.round(((daysElapsed + daysToSun) / totalDays) * 100), 100) : 0;
+
+  const barLabels = document.getElementById("barLabels");
+  if (totalDays > 0 && s.startDate && s.endDate) {
+    barLabels.style.display = "";
+    const lt = document.getElementById("labelToday"), lw = document.getElementById("labelWeek");
+    const it = document.getElementById("lineToday"), iw = document.getElementById("lineWeek");
+    lt.textContent = targetTodayPct + "%"; lt.style.left = targetTodayPct + "%";
+    lw.textContent = targetWeekPct + "%"; lw.style.left = targetWeekPct + "%";
+    it.style.left = targetTodayPct + "%";
+    iw.style.left = targetWeekPct + "%";
+  } else {
+    barLabels.style.display = "none";
+  }
+
+  const suggestionEl = document.getElementById("suggestion");
+  if (daysLeft === 0) {
+    suggestionEl.textContent = "End date has passed. Update your schedule in Settings.";
+  } else if (currentRate < requiredRate) {
+    suggestionEl.innerHTML = `<span style="color:var(--need)">⚠ Speed up!</span> Averaging <b>${currentRate.toFixed(1)}h/day</b>, need <b>${requiredRate.toFixed(1)}h/day</b> to finish by ${s.endDate}.`;
+  } else if (currentRate >= requiredRate && requiredRate > 0) {
+    suggestionEl.innerHTML = `<span style="color:var(--fun)">✓ On track!</span> Projected finish: <b>${projected}</b> (ahead of ${s.endDate})`;
+  } else {
+    suggestionEl.innerHTML = `<span style="color:var(--fun)">✓ On track!</span> Keep going!`;
+  }
 
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
@@ -109,6 +175,7 @@ function render() {
   visibleGoals().forEach(g => {
     const idx  = goals.indexOf(g);
     const pct2 = g.est ? Math.min((g.done/g.est)*100, 100) : 0;
+    const remaining = g.est - g.done;
 
     const div = document.createElement("div");
     div.className = "goal";
@@ -130,13 +197,14 @@ function render() {
           <div class="goal-hours-label">hours</div>
         </div>
         <button class="btn-expand" data-idx="${idx}">${isExpanded ? '▲' : '▼'}</button>
+        <button class="btn-pin" data-idx="${idx}" title="${g.pinned ? 'Unpin' : 'Pin'}">${g.pinned ? '●' : '○'}</button>
       </div>
       <div class="goal-bar-track">
         <div class="goal-bar-fill" style="width:${pct2}%"></div>
       </div>
       <div class="goal-footer">
         <span class="goal-pct">${pct2.toFixed(0)}%</span>
-        ${unallocated > 0 ? `<span class="goal-unalloc">${unallocated.toFixed(1)}h unallocated</span>` : ''}
+        <span class="goal-remaining">${remaining.toFixed(1)}h left</span>
         <div class="goal-actions">
           <input class="goal-input goal-time-input" data-idx="${idx}"
             type="number" min="0" step="1" placeholder="mins" />
@@ -221,6 +289,20 @@ document.getElementById("grid").addEventListener("click", function(e) {
     return;
   }
 
+  // Pin toggle
+  const pinBtn = e.target.closest(".btn-pin");
+  if (pinBtn) {
+    e.stopPropagation();
+    const idx = parseInt(pinBtn.dataset.idx, 10);
+    const g = goals[idx];
+    if (!g) return;
+    g.pinned = !g.pinned;
+    g.lastModified = new Date().toISOString();
+    save();
+    render();
+    return;
+  }
+
   // Delete subtask
   const delBtn = e.target.closest(".btn-subtask-del");
   if (delBtn) {
@@ -252,12 +334,27 @@ document.getElementById("grid").addEventListener("keydown", function(e) {
 });
 
 // ── Filter bar ─────────────────────────────────────────────────────────────────
+const LABELS = { SORT_PROGRESS: "By Progress", SORT_SHORT: "Shortest", SORT_RECENT: "Recent" };
+
 document.querySelector(".filter-bar").addEventListener("click", function(e) {
   const btn = e.target.closest(".filter-btn");
   if (!btn) return;
-  activeFilter = btn.dataset.filter;
+  const filter = btn.dataset.filter;
+  const isSort = filter in LABELS;
+  if (isSort && activeFilter === filter) {
+    sortDirection *= -1;
+  } else {
+    sortDirection = 1;
+    activeFilter = filter;
+  }
   document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
+  document.querySelectorAll(".filter-btn[data-filter]").forEach(b => {
+    const f = b.dataset.filter;
+    if (f in LABELS) {
+      b.textContent = f === activeFilter ? LABELS[f] + (sortDirection === 1 ? " ▲" : " ▼") : LABELS[f];
+    }
+  });
   render();
 });
 
@@ -390,7 +487,8 @@ function openOverview() {
   });
   listHtml += '</div>';
 
-  document.getElementById("overviewContent").innerHTML = statsHtml + listHtml;
+  const weeklyHtml = buildWeeklyHtml();
+  document.getElementById("overviewContent").innerHTML = statsHtml + listHtml + weeklyHtml;
   document.getElementById("overviewModal").classList.add("open");
 }
 
@@ -399,10 +497,227 @@ function closeOverview(e) {
   document.getElementById("overviewModal").classList.remove("open");
 }
 
+// ── Weekly Analysis ───────────────────────────────────────────────────────────
+function buildWeeklyHtml() {
+  const days = [];
+  const today = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const hours = state.dailyLog[key] || 0;
+    const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+    days.push({ key, dayName, hours });
+  }
+  const t = state.settings.dailyTarget;
+  const total = days.reduce((s, d) => s + d.hours, 0);
+  const wkTarget = t * 7;
+  const pct = wkTarget > 0 ? Math.min((total/wkTarget)*100, 100) : 0;
+  let html = '<div class="weekly-section"><div class="ov-stat-label" style="margin:12px 0 8px;text-align:center">Weekly Progress</div><div class="weekly-grid">';
+  days.forEach(d => {
+    const met = d.hours >= t;
+    html += `<div class="weekly-day"><div class="weekly-day-name">${d.dayName}</div><div class="weekly-bar-wrap"><div class="weekly-bar-fill" style="width:${Math.min((d.hours/t)*100,100)}%;background:${met ? 'var(--fun)' : 'var(--need)'}"></div></div><div class="weekly-hours">${d.hours.toFixed(1)}h</div></div>`;
+  });
+  html += `</div><div class="weekly-total">Total: ${total.toFixed(1)}h / ${wkTarget.toFixed(1)}h (${pct.toFixed(0)}%)</div></div>`;
+  return html;
+}
+
+// ── Timeline helpers ──────────────────────────────────────────────────────────
+function daysBetween(a, b) {
+  return Math.floor((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
+}
+
+function addDays(d, n) {
+  const date = new Date(d);
+  date.setDate(date.getDate() + n);
+  return date.toISOString().slice(0, 10);
+}
+
+// ── Settings Modal ─────────────────────────────────────────────────────────────
+function openSettingsModal() {
+  document.getElementById("settingsStartDate").value = state.settings.startDate;
+  document.getElementById("settingsEndDate").value = state.settings.endDate;
+  document.getElementById("settingsDailyTarget").value = state.settings.dailyTarget;
+  document.getElementById("githubToken").value = gistToken;
+  document.getElementById("gistId").value = gistId;
+  document.getElementById("gistConnectBtn").textContent = gistToken && gistId ? "Reconnect" : "Connect";
+  document.getElementById("gistRemoveBtn").style.display = gistToken && gistId ? "" : "none";
+  document.getElementById("gistConnectBtn").disabled = false;
+  document.getElementById("settingsModal").classList.add("open");
+}
+
+function closeSettingsModal(e) {
+  if (e && e.target !== document.getElementById("settingsModal")) return;
+  document.getElementById("settingsModal").classList.remove("open");
+}
+
+function saveSettings() {
+  const startDate = document.getElementById("settingsStartDate").value;
+  const endDate = document.getElementById("settingsEndDate").value;
+  const dailyTarget = parseFloat(document.getElementById("settingsDailyTarget").value);
+  if (!startDate || !endDate || isNaN(dailyTarget) || dailyTarget <= 0) {
+    alert("Enter valid values."); return;
+  }
+  if (new Date(startDate) >= new Date(endDate)) {
+    alert("End date must be after start date."); return;
+  }
+  state.settings = { startDate, endDate, dailyTarget };
+  save();
+  document.getElementById("settingsModal").classList.remove("open");
+  render();
+}
+
+function connectGist() {
+  const token = document.getElementById("githubToken").value.trim();
+  const id = document.getElementById("gistId").value.trim();
+  if (!token) { alert("Enter a GitHub token."); return; }
+  gistToken = token;
+  localStorage.setItem("uni_gist_token", token);
+  document.getElementById("gistConnectBtn").disabled = true;
+  document.getElementById("gistConnectBtn").textContent = "Connecting...";
+  (async () => {
+    try {
+      if (id) {
+        gistId = id;
+        localStorage.setItem("uni_gist_id", id);
+        await syncToGist();
+      } else {
+        const payload = {
+          app: "uni-time",
+          exportedAt: new Date().toISOString(),
+          data: { version: state.version, goals: state.goals, settings: state.settings, dailyLog: state.dailyLog }
+        };
+        const res = await fetch("https://api.github.com/gists", {
+          method: "POST",
+          headers: { Authorization: `token ${gistToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ description: "UNI Time sync data", public: false,
+            files: { "uni-time.json": { content: JSON.stringify(payload, null, 2) } } })
+        });
+        if (!res.ok) throw new Error(`GitHub ${res.status}`);
+        const gist = await res.json();
+        gistId = gist.id;
+        localStorage.setItem("uni_gist_id", gistId);
+        document.getElementById("gistId").value = gistId;
+        gistSynced = payload.exportedAt;
+        updateSyncIndicator("connected");
+      }
+      document.getElementById("gistConnectBtn").disabled = false;
+      document.getElementById("gistConnectBtn").textContent = "Reconnect";
+      document.getElementById("gistRemoveBtn").style.display = "";
+    } catch (e) {
+      document.getElementById("gistConnectBtn").disabled = false;
+      document.getElementById("gistConnectBtn").textContent = "Retry";
+      updateSyncIndicator("error", e.message);
+    }
+  })();
+}
+
+function removeGist() {
+  if (!confirm("Disconnect GitHub sync?")) return;
+  gistToken = "";
+  gistId = "";
+  gistSynced = null;
+  localStorage.removeItem("uni_gist_token");
+  localStorage.removeItem("uni_gist_id");
+  updateSyncIndicator("disconnected");
+  document.getElementById("githubToken").value = "";
+  document.getElementById("gistId").value = "";
+  document.getElementById("gistConnectBtn").textContent = "Connect";
+  document.getElementById("gistRemoveBtn").style.display = "none";
+}
+
+function updateSyncIndicator(status, msg) {
+  const el = document.getElementById("syncIndicator");
+  if (!el) return;
+  el.className = "sync-indicator " + status;
+  el.title = status === "connected" ? "Synced to GitHub" : status === "syncing" ? "Syncing..." : status === "error" ? "Sync error: " + (msg || "") : "Sync not configured";
+}
+
+// ── P2P Sync Modal ─────────────────────────────────────────────────────────────
+function openSyncModal() {
+  const phrase = window.YjsSync ? window.YjsSync.getPhrase() : null;
+  document.getElementById('syncPanelNotConnected').style.display = phrase ? 'none' : '';
+  document.getElementById('syncPanelConnected').style.display = phrase ? '' : 'none';
+  if (phrase) {
+    document.getElementById('syncPhraseDisplay').textContent = phrase;
+    if (window.QRCodeUtil) {
+      const url = location.origin + location.pathname + '?sync=' + encodeURIComponent(phrase);
+      window.QRCodeUtil.render(url, 'qrContainer');
+    }
+    updateP2PStatus();
+  }
+  document.getElementById('syncModal').classList.add('open');
+}
+
+function closeSyncModal(e) {
+  if (e && e.target !== document.getElementById('syncModal')) return;
+  document.getElementById('syncModal').classList.remove('open');
+}
+
+function createSyncRoom() {
+  const phrase = window.Passphrase ? window.Passphrase.generate() : 'room-' + Math.random().toString(36).slice(2, 10);
+  if (window.YjsSync) {
+    window.YjsSync.createRoom(phrase);
+    openSyncModal();
+  }
+}
+
+function joinSyncRoom() {
+  const phrase = document.getElementById('syncPhraseInput').value.trim();
+  if (!phrase) return;
+  if (window.YjsSync) {
+    window.YjsSync.createRoom(phrase);
+    openSyncModal();
+  }
+}
+
+function leaveSyncRoom() {
+  if (!confirm('Leave sync room? Other devices will stop syncing.')) return;
+  if (window.YjsSync) window.YjsSync.leaveRoom();
+  openSyncModal();
+}
+
+function copySyncPhrase() {
+  const text = document.getElementById('syncPhraseDisplay').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    // Brief toast-like feedback
+    const btn = document.querySelector('.btn-copy');
+    const old = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = old, 1200);
+  }).catch(() => alert('Phrase: ' + text));
+}
+
+function updateP2PStatus() {
+  if (!window.YjsSync) return;
+  const { status, peers } = window.YjsSync.getStatus();
+  const dot = document.getElementById('p2pStatusDot');
+  const text = document.getElementById('p2pStatusText');
+  const count = document.getElementById('p2pPeerCount');
+  if (dot) dot.className = 'sync-dot ' + (status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : 'off');
+  if (text) text.textContent = status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Offline';
+  if (count) count.textContent = peers > 0 ? '(' + peers + ' peer' + (peers === 1 ? '' : 's') + ')' : '';
+}
+
+// ── Yjs P2P event listeners ────────────────────────────────────────────────────
+window.addEventListener('yjs-remote-update', (e) => {
+  const { goals: remoteGoals, settings: remoteSettings, dailyLog: remoteDailyLog } = e.detail;
+  goals = remoteGoals;
+  state.goals = goals;
+  state.settings = remoteSettings;
+  state.dailyLog = remoteDailyLog;
+  localStorage.setItem("uni_v3", JSON.stringify(state));
+  render();
+});
+
+window.addEventListener('yjs-status', (e) => {
+  updateP2PStatus();
+});
+
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────────
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
-    ["editModal","addModal","overviewModal"].forEach(id =>
+    ["editModal","addModal","overviewModal","settingsModal","syncModal"].forEach(id =>
       document.getElementById(id).classList.remove("open")
     );
   }
@@ -411,6 +726,61 @@ document.addEventListener("keydown", e => {
     if (document.getElementById("addModal").classList.contains("open"))  confirmAdd();
   }
 });
+
+// ── GitHub Gist Sync ─────────────────────────────────────────
+async function scheduleSync() {
+  clearTimeout(syncDebounce);
+  if (gistToken && gistId) {
+    syncDebounce = setTimeout(syncToGist, 3000);
+  }
+}
+
+async function syncToGist() {
+  if (!gistToken || !gistId) return;
+  updateSyncIndicator("syncing");
+  const payload = {
+    app: "uni-time",
+    exportedAt: new Date().toISOString(),
+    data: { version: state.version, goals: state.goals, settings: state.settings, dailyLog: state.dailyLog }
+  };
+  try {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      method: "PATCH",
+      headers: { Authorization: `token ${gistToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ files: { "uni-time.json": { content: JSON.stringify(payload, null, 2) } } })
+    });
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    gistSynced = payload.exportedAt;
+    updateSyncIndicator("connected");
+  } catch (e) {
+    updateSyncIndicator("error", e.message);
+  }
+}
+
+async function syncFromGist() {
+  if (!gistToken || !gistId) return;
+  updateSyncIndicator("syncing");
+  try {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: { Authorization: `token ${gistToken}` }
+    });
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const gist = await res.json();
+    const remote = JSON.parse(gist.files["uni-time.json"].content);
+    const remoteTime = new Date(remote.exportedAt).getTime();
+    const localTime = gistSynced ? new Date(gistSynced).getTime() : 0;
+    if (remoteTime > localTime) {
+      state = remote.data;
+      localStorage.setItem("uni_v3", JSON.stringify(state));
+      goals = state.goals;
+      gistSynced = remote.exportedAt;
+      render();
+    }
+    updateSyncIndicator("connected");
+  } catch (e) {
+    updateSyncIndicator("error", e.message);
+  }
+}
 
 // ── Export / Import ────────────────────────────────────────
 function exportData() {
@@ -554,3 +924,17 @@ function confirmAddSubtask(idx) {
 
 // ── Init ────────────────────────────────────────────────────
 render();
+
+// Auto-join from URL ?sync=phrase
+const urlParams = new URLSearchParams(location.search);
+const syncPhrase = urlParams.get('sync');
+if (syncPhrase && window.YjsSync) {
+  window.YjsSync.createRoom(syncPhrase);
+  history.replaceState({}, '', location.pathname);
+}
+
+// Init existing P2P sync
+if (window.YjsSync) window.YjsSync.init();
+
+// Init Gist sync
+if (gistToken && gistId) syncFromGist();
