@@ -2,7 +2,7 @@
   "name": "UNI Time",
   "short_name": "UNI Time",
   "description": "Electrical Engineering Prep Tracker",
-  "start_url": "/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#08080c",
   "theme_color": "#08080c",
